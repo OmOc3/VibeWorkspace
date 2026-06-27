@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { app } from 'electron';
 import { registerWorkspaceIpcHandlers } from './ipc';
+import { buildAndSetApplicationMenu } from './menu';
 import { AuthService } from './services/AuthService';
 import { createRootLogger } from './services/Logger';
 import { ProfileService } from './services/ProfileService';
@@ -28,6 +29,7 @@ export async function bootstrapApplication(): Promise<void> {
 
   const mainWindow = new MainWindow(logger.child('window'));
   const browserWindow = mainWindow.create();
+  buildAndSetApplicationMenu(browserWindow);
   const sessionProfilesRoot = path.join(userDataPath, 'session-profiles');
   const terminalService = new TerminalService(
     browserWindow,

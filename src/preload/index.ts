@@ -38,8 +38,10 @@ const IPC_CHANNELS = {
   terminalInput: 'terminal:input',
   terminalResize: 'terminal:resize',
   terminalKill: 'terminal:kill',
+  terminalClear: 'terminal:clear',
   terminalData: 'terminal:data',
   terminalExit: 'terminal:exit',
+  setWindowTitle: 'window:set-title',
   authStartLogin: 'auth:start-login',
   authLogout: 'auth:logout',
   authRefreshStatus: 'auth:refresh-status',
@@ -50,6 +52,13 @@ const IPC_CHANNELS = {
   profileGenerateCliWrapper: 'profile:generate-cli-wrapper',
   workspaceStateChanged: 'workspace:state-changed',
 } as const;
+
+const MENU_EVENT_CHANNELS = new Set([
+  'menu:new-tab',
+  'menu:new-subtab',
+  'menu:open-project',
+  'menu:command-palette',
+]);
 
 async function invokeWorkspaceState(channel: string, payload?: unknown): Promise<WorkspaceState> {
   return (await ipcRenderer.invoke(channel, payload)) as WorkspaceState;
@@ -83,6 +92,12 @@ const api: VibeWorkspaceApi = {
   },
   killTerminal: (input: TerminalControlInput) => {
     ipcRenderer.send(IPC_CHANNELS.terminalKill, input);
+  },
+  clearTerminal: (input: TerminalControlInput) => {
+    ipcRenderer.send(IPC_CHANNELS.terminalClear, input);
+  },
+  setWindowTitle: (title: string) => {
+    ipcRenderer.send(IPC_CHANNELS.setWindowTitle, title);
   },
   startAuthLogin: (input: AuthTabInput) =>
     invokeWorkspaceState(IPC_CHANNELS.authStartLogin, input),
@@ -127,6 +142,20 @@ const api: VibeWorkspaceApi = {
     ipcRenderer.on(IPC_CHANNELS.workspaceStateChanged, listener);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.workspaceStateChanged, listener);
+    };
+  },
+  onMenuEvent: (channel: string, callback: () => void) => {
+    if (!MENU_EVENT_CHANNELS.has(channel)) {
+      return () => undefined;
+    }
+
+    const listener = (): void => {
+      callback();
+    };
+
+    ipcRenderer.on(channel, listener);
+    return () => {
+      ipcRenderer.removeListener(channel, listener);
     };
   },
 };

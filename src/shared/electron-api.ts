@@ -36,6 +36,8 @@ export interface VibeWorkspaceApi {
   writeTerminal: (input: TerminalInput) => void;
   resizeTerminal: (input: TerminalResizeInput) => void;
   killTerminal: (input: TerminalControlInput) => void;
+  clearTerminal: (input: TerminalControlInput) => void;
+  setWindowTitle: (title: string) => void;
   startAuthLogin: (input: AuthTabInput) => Promise<WorkspaceState>;
   logoutAuth: (input: AuthTabInput) => Promise<WorkspaceState>;
   refreshAuthStatus: (input: AuthTabInput) => Promise<WorkspaceState>;
@@ -47,6 +49,7 @@ export interface VibeWorkspaceApi {
   onTerminalData: (callback: (event: TerminalDataEvent) => void) => () => void;
   onTerminalExit: (callback: (event: TerminalExitEvent) => void) => () => void;
   onWorkspaceStateChanged: (callback: (state: WorkspaceState) => void) => () => void;
+  onMenuEvent: (channel: string, callback: () => void) => () => void;
 }
 
 declare global {

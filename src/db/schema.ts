@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 
 export const workspaces = sqliteTable('workspaces', {
@@ -21,57 +21,73 @@ export const projects = sqliteTable('projects', {
   lastOpenedAt: integer('last_opened_at').notNull(),
 });
 
-export const agentTabs = sqliteTable('agent_tabs', {
-  id: text('id').primaryKey(),
-  projectId: text('project_id')
-    .notNull()
-    .references(() => projects.id, { onDelete: 'cascade' }),
-  title: text('title').notNull(),
-  active: integer('active', { mode: 'boolean' }).notNull().default(false),
-  sortOrder: integer('sort_order').notNull(),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
-});
+export const agentTabs = sqliteTable(
+  'agent_tabs',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    active: integer('active', { mode: 'boolean' }).notNull().default(false),
+    sortOrder: integer('sort_order').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [index('idx_agent_tabs_project_id').on(table.projectId)],
+);
 
-export const sessionProfiles = sqliteTable('session_profiles', {
-  id: text('id').primaryKey(),
-  agentTabId: text('agent_tab_id')
-    .notNull()
-    .references(() => agentTabs.id, { onDelete: 'cascade' }),
-  appKind: text('app_kind').notNull().default('codex'),
-  partitionId: text('partition_id').notNull().unique(),
-  authStatus: text('auth_status').notNull().default('not connected'),
-  usageSnapshot: text('usage_snapshot'),
-  cliWrapperPath: text('cli_wrapper_path'),
-  lastImportedAt: integer('last_imported_at'),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
-});
+export const sessionProfiles = sqliteTable(
+  'session_profiles',
+  {
+    id: text('id').primaryKey(),
+    agentTabId: text('agent_tab_id')
+      .notNull()
+      .references(() => agentTabs.id, { onDelete: 'cascade' }),
+    appKind: text('app_kind').notNull().default('codex'),
+    partitionId: text('partition_id').notNull().unique(),
+    authStatus: text('auth_status').notNull().default('not connected'),
+    usageSnapshot: text('usage_snapshot'),
+    cliWrapperPath: text('cli_wrapper_path'),
+    lastImportedAt: integer('last_imported_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [index('idx_session_profiles_agent_tab_id').on(table.agentTabId)],
+);
 
-export const agentSubtabs = sqliteTable('agent_subtabs', {
-  id: text('id').primaryKey(),
-  agentTabId: text('agent_tab_id')
-    .notNull()
-    .references(() => agentTabs.id, { onDelete: 'cascade' }),
-  title: text('title').notNull(),
-  kind: text('kind').notNull().default('terminal'),
-  preset: text('preset').notNull().default('codex'),
-  active: integer('active', { mode: 'boolean' }).notNull().default(false),
-  sortOrder: integer('sort_order').notNull(),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
-});
+export const agentSubtabs = sqliteTable(
+  'agent_subtabs',
+  {
+    id: text('id').primaryKey(),
+    agentTabId: text('agent_tab_id')
+      .notNull()
+      .references(() => agentTabs.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    kind: text('kind').notNull().default('terminal'),
+    preset: text('preset').notNull().default('codex'),
+    active: integer('active', { mode: 'boolean' }).notNull().default(false),
+    sortOrder: integer('sort_order').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [index('idx_agent_subtabs_agent_tab_id').on(table.agentTabId)],
+);
 
-export const sessionActivities = sqliteTable('session_activities', {
-  id: text('id').primaryKey(),
-  agentTabId: text('agent_tab_id')
-    .notNull()
-    .references(() => agentTabs.id, { onDelete: 'cascade' }),
-  kind: text('kind').notNull(),
-  label: text('label').notNull(),
-  metadata: text('metadata'),
-  createdAt: integer('created_at').notNull(),
-});
+export const sessionActivities = sqliteTable(
+  'session_activities',
+  {
+    id: text('id').primaryKey(),
+    agentTabId: text('agent_tab_id')
+      .notNull()
+      .references(() => agentTabs.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    label: text('label').notNull(),
+    metadata: text('metadata'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [index('idx_session_activities_agent_tab_id').on(table.agentTabId)],
+);
 
 export type WorkspaceRow = InferSelectModel<typeof workspaces>;
 export type ProjectRow = InferSelectModel<typeof projects>;

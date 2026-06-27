@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import BetterSqlite3 from 'better-sqlite3';
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import * as schema from '../../db/schema';
 import {
   agentSubtabs,
@@ -76,7 +77,9 @@ export class WorkspaceService {
   }
 
   initialize(): WorkspaceState {
-    this.runMigrations();
+    migrate(this.db, {
+      migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations'),
+    });
     this.ensureDefaultWorkspace();
     this.ensureDefaultSubtabs();
     this.logger.info('Workspace service initialized.');
@@ -622,99 +625,6 @@ export class WorkspaceService {
 
   close(): void {
     this.sqlite.close();
-  }
-
-  private runMigrations(): void {
-    this.sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS workspaces (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        active_project_id TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        path TEXT NOT NULL UNIQUE,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        last_opened_at INTEGER NOT NULL,
-        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS agent_tabs (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        active INTEGER NOT NULL DEFAULT 0,
-        sort_order INTEGER NOT NULL,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS session_profiles (
-        id TEXT PRIMARY KEY,
-        agent_tab_id TEXT NOT NULL,
-        app_kind TEXT NOT NULL DEFAULT 'codex',
-        partition_id TEXT NOT NULL UNIQUE,
-        auth_status TEXT NOT NULL DEFAULT 'not connected',
-        usage_snapshot TEXT,
-        cli_wrapper_path TEXT,
-        last_imported_at INTEGER,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        FOREIGN KEY (agent_tab_id) REFERENCES agent_tabs(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS agent_subtabs (
-        id TEXT PRIMARY KEY,
-        agent_tab_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        kind TEXT NOT NULL DEFAULT 'terminal',
-        preset TEXT NOT NULL DEFAULT 'codex',
-        active INTEGER NOT NULL DEFAULT 0,
-        sort_order INTEGER NOT NULL,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        FOREIGN KEY (agent_tab_id) REFERENCES agent_tabs(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS session_activities (
-        id TEXT PRIMARY KEY,
-        agent_tab_id TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        label TEXT NOT NULL,
-        metadata TEXT,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY (agent_tab_id) REFERENCES agent_tabs(id) ON DELETE CASCADE
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_agent_tabs_project_id ON agent_tabs(project_id);
-      CREATE INDEX IF NOT EXISTS idx_session_profiles_agent_tab_id ON session_profiles(agent_tab_id);
-      CREATE INDEX IF NOT EXISTS idx_agent_subtabs_agent_tab_id ON agent_subtabs(agent_tab_id);
-      CREATE INDEX IF NOT EXISTS idx_session_activities_agent_tab_id ON session_activities(agent_tab_id);
-    `);
-
-    this.ensureColumn('session_profiles', 'app_kind', "TEXT NOT NULL DEFAULT 'codex'");
-    this.ensureColumn('session_profiles', 'usage_snapshot', 'TEXT');
-    this.ensureColumn('session_profiles', 'cli_wrapper_path', 'TEXT');
-    this.ensureColumn('session_profiles', 'last_imported_at', 'INTEGER');
-  }
-
-  private ensureColumn(tableName: string, columnName: string, definition: string): void {
-    const columns = this.sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{
-      name: string;
-    }>;
-
-    if (columns.some((column) => column.name === columnName)) {
-      return;
-    }
-
-    this.sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
   }
 
   private ensureDefaultWorkspace(): void {

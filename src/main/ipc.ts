@@ -148,6 +148,15 @@ export function registerWorkspaceIpcHandlers(
     }
   });
 
+  ipcMain.on(IPC_CHANNELS.terminalClear, (_event, input: unknown) => {
+    try {
+      const parsedInput = terminalControlInputSchema.parse(input);
+      terminalService.clearTerminal(parsedInput.subtabId);
+    } catch (error) {
+      logger.warn('Invalid terminal clear payload.', { error });
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.authStartLogin, async (_event, input: unknown) => {
     const parsedInput = authTabInputSchema.parse(input);
     return authService.startLogin(parsedInput.tabId);
@@ -192,6 +201,12 @@ export function registerWorkspaceIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.profileGenerateCliWrapper, async (_event, input: unknown) => {
     const parsedInput = profileTabInputSchema.parse(input);
     return profileService.generateCliWrapper(parsedInput.tabId);
+  });
+
+  ipcMain.on(IPC_CHANNELS.setWindowTitle, (_event, title: string) => {
+    if (typeof title === 'string' && title.length > 0 && title.length < 200) {
+      window.setTitle(title);
+    }
   });
 
   logger.info('Workspace IPC handlers registered.');

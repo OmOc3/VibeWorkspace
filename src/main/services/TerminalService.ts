@@ -55,7 +55,7 @@ export class TerminalService {
       cwd: context.project.path,
       env: buildIsolatedCodexEnv(codexHome),
       encoding: 'utf8',
-      useConpty: true,
+      useConpty: process.platform === 'win32',
     });
 
     const disposables = [
@@ -99,7 +99,14 @@ export class TerminalService {
   }
 
   clearTerminal(subtabId: string): void {
-    this.terminals.get(subtabId)?.pty.clear();
+    const terminal = this.terminals.get(subtabId);
+
+    if (!terminal) {
+      return;
+    }
+
+    terminal.pty.write('\x0c');
+    terminal.pty.clear();
   }
 
   killTerminal(subtabId: string): void {

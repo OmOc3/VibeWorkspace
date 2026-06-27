@@ -264,6 +264,10 @@ function createMockWorkspaceApi(): VibeWorkspaceApi {
     killTerminal: ({ subtabId }) => {
       emitTerminalExit(terminalExitSubscribers, { subtabId, exitCode: 0, signal: null });
     },
+    clearTerminal: () => undefined,
+    setWindowTitle: (title) => {
+      document.title = title;
+    },
     startAuthLogin: async ({ tabId }) => setAuthStatus(tabsByProject, tabId, 'login pending', getState),
     logoutAuth: async ({ tabId }) => setAuthStatus(tabsByProject, tabId, 'not connected', getState),
     refreshAuthStatus: async ({ tabId }) => setAuthStatus(tabsByProject, tabId, 'connected', getState),
@@ -304,6 +308,9 @@ function createMockWorkspaceApi(): VibeWorkspaceApi {
       };
     },
     onWorkspaceStateChanged: () => {
+      return () => undefined;
+    },
+    onMenuEvent: () => {
       return () => undefined;
     },
   };

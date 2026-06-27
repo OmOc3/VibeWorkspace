@@ -16,9 +16,11 @@ export function MainLayout({ onToggleTheme, themeMode }: MainLayoutProps): JSX.E
   const state = useWorkspaceStore((store) => store.state);
   const loading = useWorkspaceStore((store) => store.loading);
   const error = useWorkspaceStore((store) => store.error);
+  const chooseProject = useWorkspaceStore((store) => store.chooseProject);
   const createTab = useWorkspaceStore((store) => store.createTab);
+  const createSubtabForTab = useWorkspaceStore((store) => store.createSubtab);
   const setActiveTab = useWorkspaceStore((store) => store.setActiveTab);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(() => Boolean(state?.selectedProject));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
@@ -57,8 +59,51 @@ export function MainLayout({ onToggleTheme, themeMode }: MainLayoutProps): JSX.E
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [createTab, setActiveTab, state?.tabs]);
+    const api = window.vibeWorkspace;
+    const unsubNewTab = api?.onMenuEvent?.('menu:new-tab', () => void createTab());
+    const unsubNewSubtab = api?.onMenuEvent?.('menu:new-subtab', () => {
+      if (activeTabId) {
+        void createSubtabForTab(activeTabId);
+      }
+    });
+    const unsubOpenProject = api?.onMenuEvent?.('menu:open-project', () => void chooseProject());
+    const unsubCommandPalette = api?.onMenuEvent?.('menu:command-palette', () => {
+      setCommandPaletteOpen((open) => !open);
+    });
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      unsubNewTab?.();
+      unsubNewSubtab?.();
+      unsubOpenProject?.();
+      unsubCommandPalette?.();
+    };
+  }, [activeTabId, chooseProject, createSubtabForTab, createTab, setActiveTab, state?.tabs]);
+
+  useEffect(() => {
+    if (state?.selectedProject) {
+      // Project state is loaded asynchronously from SQLite after the initial render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setWorkspaceOpen(true);
+    }
+  }, [state?.selectedProject]);
+
+  useEffect(() => {
+    if (!window.vibeWorkspace) {
+      return;
+    }
+
+    const project = state?.selectedProject;
+    const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId);
+
+    if (project) {
+      const tabLabel = activeTab ? ` - ${activeTab.title}` : '';
+      window.vibeWorkspace.setWindowTitle(`${project.name}${tabLabel} - Vibe Coding Workspace`);
+      return;
+    }
+
+    window.vibeWorkspace.setWindowTitle('Vibe Coding Workspace');
+  }, [state?.activeTabId, state?.selectedProject, state?.tabs]);
 
   if (loading && !state) {
     return (
@@ -97,6 +142,7 @@ export function MainLayout({ onToggleTheme, themeMode }: MainLayoutProps): JSX.E
     <div className={sidebarCollapsed ? 'app-shell app-shell--sidebar-collapsed' : 'app-shell'}>
       <Sidebar
         collapsed={sidebarCollapsed}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         onOpenProjectPicker={() => setWorkspaceOpen(false)}
         onToggleTheme={onToggleTheme}
         onToggle={() => setSidebarCollapsed((collapsed) => !collapsed)}

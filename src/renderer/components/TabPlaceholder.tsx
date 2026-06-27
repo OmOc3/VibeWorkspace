@@ -268,6 +268,7 @@ function TerminalPane({
   const enhancedOutputRef = useRef<HTMLDivElement | null>(null);
   const enhancedInputRef = useRef<HTMLTextAreaElement | null>(null);
   const isComposingRef = useRef(false);
+  const hasAutoStartedRef = useRef(false);
   const [parser] = useState(() => new CodexStreamParser(subtab.title, subtab.preset));
 
   const [status, setStatus] = useState<TerminalStatus>('stopped');
@@ -394,10 +395,10 @@ function TerminalPane({
       lineHeight: 1.25,
       scrollback: 8000,
       theme: {
-        background: '#151512',
-        foreground: '#ece7dc',
-        cursor: '#7ec9b0',
-        selectionBackground: '#2c4f45',
+        background: '#010102',
+        foreground: '#f7f8f8',
+        cursor: '#828fff',
+        selectionBackground: '#23252a',
       },
     });
     const fitAddon = new FitAddon();
@@ -444,6 +445,15 @@ function TerminalPane({
       fitAddonRef.current = null;
     };
   }, [fitAndResize, getParser, subtab.id, subtab.preset, subtab.title]);
+
+  useEffect(() => {
+    if (hidden || hasAutoStartedRef.current) {
+      return;
+    }
+
+    hasAutoStartedRef.current = true;
+    void startTerminal();
+  }, [hidden, startTerminal]);
 
   useEffect(() => {
     requestAnimationFrame(fitAndResize);
@@ -501,6 +511,7 @@ function TerminalPane({
   };
 
   const clearTerminal = (): void => {
+    getWorkspaceApi().clearTerminal({ subtabId: subtab.id });
     terminalRef.current?.clear();
     setCodexUiState(getParser().clear(subtab.title, subtab.preset));
   };

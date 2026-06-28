@@ -6,6 +6,7 @@ import { Sidebar } from './Sidebar';
 import { TabBar } from './TabBar';
 import { TabPlaceholder } from './TabPlaceholder';
 import { useWorkspaceStore } from '../state/workspaceStore';
+import { DEFAULT_WORKSPACE_VIEW, type WorkspaceView } from '../workspaceViews';
 
 interface MainLayoutProps {
   onToggleTheme: () => void;
@@ -21,7 +22,10 @@ export function MainLayout({ onToggleTheme, themeMode }: MainLayoutProps): JSX.E
   const createSubtabForTab = useWorkspaceStore((store) => store.createSubtab);
   const setActiveTab = useWorkspaceStore((store) => store.setActiveTab);
   const [workspaceOpen, setWorkspaceOpen] = useState(() => Boolean(state?.selectedProject));
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [activeWorkspaceView, setActiveWorkspaceView] =
+    useState<WorkspaceView>(DEFAULT_WORKSPACE_VIEW);
+  const [sidebarPinned, setSidebarPinned] = useState(true);
+  const [sidebarHovered, setSidebarHovered] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
   const activeTabId = state?.activeTabId ?? state?.tabs[0]?.id ?? null;
@@ -139,13 +143,32 @@ export function MainLayout({ onToggleTheme, themeMode }: MainLayoutProps): JSX.E
   const selectedProject = state.selectedProject;
 
   return (
-    <div className={sidebarCollapsed ? 'app-shell app-shell--sidebar-collapsed' : 'app-shell'}>
+    <div className={sidebarPinned ? 'app-shell app-shell--sidebar-pinned' : 'app-shell app-shell--sidebar-unpinned'}>
+      {!sidebarPinned && (
+        <div
+          className="workspace-sidebar__hover-trigger"
+          onMouseEnter={() => setSidebarHovered(true)}
+        />
+      )}
       <Sidebar
-        collapsed={sidebarCollapsed}
+        activeView={activeWorkspaceView}
+        pinned={sidebarPinned}
+        hovered={sidebarHovered}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         onOpenProjectPicker={() => setWorkspaceOpen(false)}
+        onSetActiveView={setActiveWorkspaceView}
         onToggleTheme={onToggleTheme}
-        onToggle={() => setSidebarCollapsed((collapsed) => !collapsed)}
+        onTogglePin={() => {
+          setSidebarPinned((pinned) => {
+            const next = !pinned;
+            if (!next) {
+              setSidebarHovered(false);
+            }
+            return next;
+          });
+        }}
+        onMouseEnter={() => setSidebarHovered(true)}
+        onMouseLeave={() => setSidebarHovered(false)}
         themeMode={themeMode}
       />
       <main className="workspace-shell">
@@ -156,6 +179,7 @@ export function MainLayout({ onToggleTheme, themeMode }: MainLayoutProps): JSX.E
             state.tabs.map((tab) => (
               <TabPlaceholder
                 active={tab.id === activeTabId}
+                activeView={activeWorkspaceView}
                 key={tab.id}
                 tab={tab}
                 project={selectedProject}

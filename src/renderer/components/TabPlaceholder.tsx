@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type JSX,
 } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal as XTerm } from '@xterm/xterm';
@@ -20,6 +21,7 @@ import {
   Database,
   Eraser,
   FileText,
+  FolderOpen,
   Gauge,
   Hammer,
   KeyRound,
@@ -45,6 +47,7 @@ import type {
   AgentSubtab,
   AgentTab,
   Project,
+  ProjectSummary,
   TerminalViewMode,
   UsageSnapshot,
   UsageWindowSnapshot,
@@ -60,9 +63,11 @@ import {
   type CodexUiState,
 } from '../codex/codexStreamParser';
 import { useWorkspaceStore } from '../state/workspaceStore';
+import type { WorkspaceView } from '../workspaceViews';
 
 interface TabPlaceholderProps {
   active: boolean;
+  activeView: WorkspaceView;
   tab: AgentTab;
   project: Project;
 }
@@ -75,8 +80,11 @@ const CONTROL_C_CHARACTER = String.fromCharCode(3);
 const CONTROL_D_CHARACTER = String.fromCharCode(4);
 const CONTROL_L_CHARACTER = String.fromCharCode(12);
 
-export function TabPlaceholder({ active, tab, project }: TabPlaceholderProps): JSX.Element {
+export function TabPlaceholder({ active, activeView, tab, project }: TabPlaceholderProps): JSX.Element {
   const loading = useWorkspaceStore((store) => store.loading);
+  const state = useWorkspaceStore((store) => store.state);
+  const chooseProject = useWorkspaceStore((store) => store.chooseProject);
+  const selectProject = useWorkspaceStore((store) => store.selectProject);
   const createSubtab = useWorkspaceStore((store) => store.createSubtab);
   const closeSubtab = useWorkspaceStore((store) => store.closeSubtab);
   const setActiveSubtab = useWorkspaceStore((store) => store.setActiveSubtab);
@@ -94,12 +102,15 @@ export function TabPlaceholder({ active, tab, project }: TabPlaceholderProps): J
   const activeExpandedSubtabId = tab.subtabs.some((subtab) => subtab.id === expandedSubtabId)
     ? expandedSubtabId
     : null;
-  const titleId = `agent-workspace-title-${tab.id}`;
+  const terminalTitleId = `agent-terminal-title-${tab.id}`;
+  const sessionTitleId = `agent-session-title-${tab.id}`;
+  const workspaceLabelledBy =
+    activeView === 'terminal' ? terminalTitleId : activeView === 'session' ? sessionTitleId : undefined;
 
   useEffect(() => {
     const element = authViewRef.current;
 
-    if (!active || !loginPending || !element) {
+    if (!active || activeView !== 'session' || !loginPending || !element) {
       void getWorkspaceApi().hideAuthView({ tabId: tab.id });
       return;
     }
@@ -125,118 +136,286 @@ export function TabPlaceholder({ active, tab, project }: TabPlaceholderProps): J
       window.removeEventListener('resize', updateBounds);
       void getWorkspaceApi().hideAuthView({ tabId: tab.id });
     };
-  }, [active, loginPending, tab.id]);
+  }, [active, activeView, loginPending, tab.id]);
 
   return (
-    <section className="agent-workspace" aria-labelledby={titleId} hidden={!active}>
-      <ProfileHero
-        loading={loading}
-        loginPending={loginPending}
-        onGenerateWrapper={() => void generateCliWrapper(tab.id)}
-        onImportDefault={() => void importDefaultProfile(tab.id)}
-        onLogin={() => void startAuthLogin(tab.id)}
-        onLogout={() => void logoutAuth(tab.id)}
-        onRefreshAuth={() => void refreshAuthStatus(tab.id)}
-        onRefreshUsage={() => void refreshProfileUsage(tab.id)}
-        project={project}
-        tab={tab}
-        titleId={titleId}
-      />
+    <section
+      className="agent-workspace"
+      aria-labelledby={workspaceLabelledBy}
+      aria-label={workspaceLabelledBy ? undefined : `${tab.title} workspace`}
+      hidden={!active}
+    >
+      <section className="terminal-workspace" hidden={activeView !== 'terminal'}>
+        <TerminalWorkspaceHeader project={project} tab={tab} titleId={terminalTitleId} />
 
-      {loginPending ? (
-        <div className="auth-view-frame" ref={authViewRef} aria-label="Codex login view" />
-      ) : null}
-
-      <div className="subtab-bar">
-        <div className="subtab-strip" role="tablist" aria-label="Terminal subtabs">
-          {tab.subtabs.length === 0 ? (
-            <div className="subtab-strip__empty">No terminal subtabs</div>
-          ) : (
-            tab.subtabs.map((subtab) => (
-              <div
-                className={subtab.active ? 'subtab subtab--active' : 'subtab'}
-                role="tab"
-                aria-selected={subtab.active}
-                tabIndex={0}
-                key={subtab.id}
-                onClick={() => void setActiveSubtab(tab.id, subtab.id)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    void setActiveSubtab(tab.id, subtab.id);
-                  }
-                }}
-              >
-                <TerminalIcon size={14} />
-                <span title={subtab.title}>{subtab.title}</span>
-                <span className="subtab__preset">{subtab.preset}</span>
-                <button
-                  className="icon-button icon-button--subtab"
-                  type="button"
-                  aria-label={`Close ${subtab.title}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void closeSubtab(tab.id, subtab.id);
+        <div className="subtab-bar">
+          <div className="subtab-strip" role="tablist" aria-label="Terminal subtabs">
+            {tab.subtabs.length === 0 ? (
+              <div className="subtab-strip__empty">No terminal subtabs</div>
+            ) : (
+              tab.subtabs.map((subtab) => (
+                <div
+                  className={subtab.active ? 'subtab subtab--active' : 'subtab'}
+                  role="tab"
+                  aria-selected={subtab.active}
+                  tabIndex={0}
+                  key={subtab.id}
+                  onClick={() => void setActiveSubtab(tab.id, subtab.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      void setActiveSubtab(tab.id, subtab.id);
+                    }
                   }}
                 >
-                  <X size={13} />
-                </button>
-              </div>
-            ))
-          )}
+                  <TerminalIcon size={14} />
+                  <span title={subtab.title}>{subtab.title}</span>
+                  <span className="subtab__preset">{subtab.preset}</span>
+                  <button
+                    className="icon-button icon-button--subtab"
+                    type="button"
+                    aria-label={`Close ${subtab.title}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void closeSubtab(tab.id, subtab.id);
+                    }}
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="subtab-actions">
+            <button
+              className="secondary-button secondary-button--inline"
+              type="button"
+              onClick={() => void createSubtab(tab.id, 'codex')}
+              disabled={loading}
+            >
+              <Plus size={15} />
+              Codex
+            </button>
+            <button
+              className="secondary-button secondary-button--inline"
+              type="button"
+              onClick={() => void createSubtab(tab.id, 'shell')}
+              disabled={loading}
+            >
+              <Plus size={15} />
+              Shell
+            </button>
+          </div>
         </div>
 
-        <div className="subtab-actions">
-          <button
-            className="secondary-button secondary-button--inline"
-            type="button"
-            onClick={() => void createSubtab(tab.id, 'codex')}
-            disabled={loading}
-          >
-            <Plus size={15} />
-            Codex
-          </button>
-          <button
-            className="secondary-button secondary-button--inline"
-            type="button"
-            onClick={() => void createSubtab(tab.id, 'shell')}
-            disabled={loading}
-          >
-            <Plus size={15} />
-            Shell
-          </button>
+        {activeSubtab ? (
+          <div className="terminal-stack">
+            {tab.subtabs.map((subtab) => (
+              <TerminalPane
+                hidden={!active || activeView !== 'terminal' || subtab.id !== activeSubtab.id}
+                key={subtab.id}
+                project={project}
+                expanded={activeExpandedSubtabId === subtab.id}
+                onToggleExpanded={() =>
+                  setExpandedSubtabId((currentSubtabId) =>
+                    currentSubtabId === subtab.id ? null : subtab.id,
+                  )
+                }
+                subtab={subtab}
+                tab={tab}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="terminal-empty">
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void createSubtab(tab.id, 'codex')}
+              disabled={loading}
+            >
+              <Plus size={15} />
+              New Codex Terminal
+            </button>
+          </div>
+        )}
+      </section>
+
+      {activeView === 'session' ? (
+        <section className="workspace-page workspace-page--session">
+          <ProfileHero
+            loading={loading}
+            loginPending={loginPending}
+            onGenerateWrapper={() => void generateCliWrapper(tab.id)}
+            onImportDefault={() => void importDefaultProfile(tab.id)}
+            onLogin={() => void startAuthLogin(tab.id)}
+            onLogout={() => void logoutAuth(tab.id)}
+            onRefreshAuth={() => void refreshAuthStatus(tab.id)}
+            project={project}
+            tab={tab}
+            titleId={sessionTitleId}
+          />
+          {loginPending ? (
+            <div className="auth-view-frame" ref={authViewRef} aria-label="Codex login view" />
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeView === 'usage' ? (
+        <UsageWorkspacePage
+          loading={loading}
+          onRefreshUsage={() => void refreshProfileUsage(tab.id)}
+          project={project}
+          tab={tab}
+        />
+      ) : null}
+
+      {activeView === 'projects' ? (
+        <ProjectsWorkspacePage
+          activeProjectId={project.id}
+          loading={loading}
+          onOpenFolder={() => void chooseProject()}
+          onSelectProject={(projectId) => void selectProject(projectId)}
+          projects={state?.projects ?? []}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function TerminalWorkspaceHeader({
+  project,
+  tab,
+  titleId,
+}: {
+  project: Project;
+  tab: AgentTab;
+  titleId: string;
+}): JSX.Element {
+  const activeSubtab = tab.subtabs.find((subtab) => subtab.id === tab.activeSubtabId) ?? null;
+
+  return (
+    <header className="terminal-workspace__header">
+      <div className="terminal-workspace__title">
+        <p className="eyebrow">terminal workspace</p>
+        <h1 id={titleId}>{activeSubtab?.title ?? tab.title}</h1>
+        <div className="terminal-workspace__meta" title={project.path}>
+          {tab.title} - {project.name} - {tab.subtabs.length} terminals
         </div>
       </div>
+      <div className="terminal-workspace__status">
+        <span className={`status-chip status-chip--${tab.sessionProfile.authStatus.replace(' ', '-')}`}>
+          {tab.sessionProfile.authStatus}
+        </span>
+      </div>
+    </header>
+  );
+}
 
-      {activeSubtab ? (
-        <div className="terminal-stack">
-          {tab.subtabs.map((subtab) => (
-            <TerminalPane
-              hidden={!active || subtab.id !== activeSubtab.id}
-              key={subtab.id}
-              project={project}
-              expanded={activeExpandedSubtabId === subtab.id}
-              onToggleExpanded={() =>
-                setExpandedSubtabId((currentSubtabId) =>
-                  currentSubtabId === subtab.id ? null : subtab.id,
-                )
-              }
-              subtab={subtab}
-              tab={tab}
-            />
-          ))}
+function UsageWorkspacePage({
+  loading,
+  onRefreshUsage,
+  project,
+  tab,
+}: {
+  loading: boolean;
+  onRefreshUsage: () => void;
+  project: Project;
+  tab: AgentTab;
+}): JSX.Element {
+  const profile = tab.sessionProfile;
+
+  return (
+    <section className="workspace-page workspace-page--usage" aria-labelledby={`usage-page-title-${tab.id}`}>
+      <header className="workspace-page__header">
+        <div>
+          <p className="eyebrow">session usage</p>
+          <h1 id={`usage-page-title-${tab.id}`}>Usage and limits</h1>
+          <div className="workspace-page__meta" title={project.path}>
+            {tab.title} - {profile.appKind} - {project.name}
+          </div>
+        </div>
+        <span className={`status-chip status-chip--${profile.usageSnapshot.status}`}>
+          {formatUsageStatus(profile.usageSnapshot)}
+        </span>
+      </header>
+
+      <UsagePanel
+        disabled={loading || profile.authStatus !== 'connected'}
+        onRefresh={onRefreshUsage}
+        usage={profile.usageSnapshot}
+      />
+    </section>
+  );
+}
+
+function ProjectsWorkspacePage({
+  activeProjectId,
+  loading,
+  onOpenFolder,
+  onSelectProject,
+  projects,
+}: {
+  activeProjectId: string;
+  loading: boolean;
+  onOpenFolder: () => void;
+  onSelectProject: (projectId: string) => void;
+  projects: ProjectSummary[];
+}): JSX.Element {
+  return (
+    <section className="workspace-page workspace-page--projects" aria-labelledby="workspace-projects-title">
+      <header className="workspace-page__header">
+        <div>
+          <p className="eyebrow">workspace projects</p>
+          <h1 id="workspace-projects-title">Projects</h1>
+          <div className="workspace-page__meta">
+            {projects.length === 0 ? 'No saved projects yet' : `${projects.length} saved projects`}
+          </div>
+        </div>
+        <button className="primary-button" type="button" onClick={onOpenFolder} disabled={loading}>
+          <FolderOpen size={15} />
+          Open folder
+        </button>
+      </header>
+
+      {projects.length === 0 ? (
+        <div className="terminal-empty terminal-empty--page">
+          <button className="primary-button" type="button" onClick={onOpenFolder} disabled={loading}>
+            <Plus size={15} />
+            Open your first project
+          </button>
         </div>
       ) : (
-        <div className="terminal-empty">
-          <button
-            className="primary-button"
-            type="button"
-            onClick={() => void createSubtab(tab.id, 'codex')}
-            disabled={loading}
-          >
-            <Plus size={15} />
-            New Codex Terminal
-          </button>
+        <div className="workspace-project-grid" role="list">
+          {projects.map((project) => (
+            <button
+              className={
+                project.id === activeProjectId
+                  ? 'workspace-project-card workspace-project-card--active'
+                  : 'workspace-project-card'
+              }
+              type="button"
+              role="listitem"
+              key={project.id}
+              onClick={() => onSelectProject(project.id)}
+              disabled={loading || project.id === activeProjectId}
+            >
+              <span className="workspace-project-card__icon" aria-hidden="true">
+                <FolderOpen size={18} />
+              </span>
+              <span className="workspace-project-card__body">
+                <strong>{project.name}</strong>
+                <code title={project.path}>{project.path}</code>
+                <span>
+                  {project.tabCount} sessions - {project.terminalCount} terminals
+                </span>
+              </span>
+              {project.activeTabTitle ? (
+                <span className="workspace-project-card__active">{project.activeTabTitle}</span>
+              ) : null}
+            </button>
+          ))}
         </div>
       )}
     </section>
@@ -270,6 +449,7 @@ function TerminalPane({
   const isComposingRef = useRef(false);
   const hasAutoStartedRef = useRef(false);
   const [parser] = useState(() => new CodexStreamParser(subtab.title, subtab.preset));
+  const [atBottom, setAtBottom] = useState(true);
 
   const [status, setStatus] = useState<TerminalStatus>('stopped');
   const [viewMode, setViewMode] = useState<TerminalViewMode>(() =>
@@ -280,6 +460,14 @@ function TerminalPane({
   const activeActivity = getActiveCodexActivity(codexUiState);
   const hasApprovalPrompt = Boolean(codexUiState.approvalPrompt);
   const hasInteractiveMenu = Boolean(codexUiState.menuPrompt);
+
+  // Auto-resize textarea as user types
+  const autoResizeTextarea = useCallback(() => {
+    const el = enhancedInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+  }, []);
 
   const getParser = useCallback((): CodexStreamParser => {
     return parser;
@@ -427,6 +615,28 @@ function TerminalPane({
 
     terminal.loadAddon(fitAddon);
     terminal.open(container);
+
+    // Smart Ctrl+C: copy selection if text is selected; otherwise send SIGINT.
+    // This prevents the common accident of killing a process when the user
+    // just wanted to copy output from the terminal.
+    terminal.attachCustomKeyEventHandler((event: KeyboardEvent): boolean => {
+      const isCtrlC = event.ctrlKey && event.key.toLowerCase() === 'c';
+
+      if (!isCtrlC) return true;
+
+      const selection = terminal.getSelection();
+
+      if (selection && selection.length > 0) {
+        // Has selected text → copy and suppress the SIGINT
+        void navigator.clipboard.writeText(selection).catch(() => undefined);
+        terminal.clearSelection();
+        return false; // prevent xterm from forwarding the keystroke
+      }
+
+      // Nothing selected → pass Ctrl+C through to the running process
+      return true;
+    });
+
     terminal.writeln(`${subtab.title} is stopped.`);
     terminal.writeln('Press Start to attach a new isolated process.');
     setCodexUiState(getParser().reset(subtab.title, subtab.preset));
@@ -466,10 +676,25 @@ function TerminalPane({
 
     const outputElement = enhancedOutputRef.current;
 
-    if (outputElement) {
+    if (outputElement && atBottom) {
       outputElement.scrollTop = outputElement.scrollHeight;
     }
-  }, [codexUiState, viewMode]);
+  }, [codexUiState, viewMode, atBottom]);
+
+  // Track whether the user is at the bottom of the chat viewport
+  useEffect(() => {
+    if (viewMode !== 'enhanced') return undefined;
+    const el = enhancedOutputRef.current;
+    if (!el) return undefined;
+
+    const handleScroll = (): void => {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setAtBottom(distFromBottom < 60);
+    };
+
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [viewMode]);
 
   useEffect(() => {
     if (!expanded) {
@@ -539,6 +764,10 @@ function TerminalPane({
     setCodexUiState(getParser().appendUserPrompt(prompt));
     sendSmartTerminalInput(`${prompt}\r`);
     setDraftInput('');
+    // Reset textarea height
+    if (enhancedInputRef.current) {
+      enhancedInputRef.current.style.height = 'auto';
+    }
   }, [draftInput, getParser, sendSmartTerminalInput]);
 
   const handleSmartKeyDown = useCallback(
@@ -548,6 +777,20 @@ function TerminalPane({
       }
 
       if (event.ctrlKey && event.key.toLowerCase() === 'c') {
+        // If the textarea has a text selection, let the browser copy it natively.
+        const textarea = enhancedInputRef.current;
+        const hasSelection =
+          textarea !== null &&
+          textarea.selectionStart !== null &&
+          textarea.selectionEnd !== null &&
+          textarea.selectionStart !== textarea.selectionEnd;
+
+        if (hasSelection) {
+          // Don't preventDefault — let the browser handle Ctrl+C as a copy
+          return;
+        }
+
+        // No selection: interrupt the running process (classic Ctrl+C behaviour)
         event.preventDefault();
         sendSmartTerminalInput(CONTROL_C_CHARACTER);
         return;
@@ -708,6 +951,19 @@ function TerminalPane({
                 <CodexMessageView key={message.id} message={message} />
               ))}
               {activeActivity ? <CodexActivityIndicator activity={activeActivity} /> : null}
+              {!atBottom ? (
+                <button
+                  className="codex-scroll-bottom"
+                  type="button"
+                  aria-label="Scroll to bottom"
+                  onClick={() => {
+                    const el = enhancedOutputRef.current;
+                    if (el) el.scrollTop = el.scrollHeight;
+                  }}
+                >
+                  ↓
+                </button>
+              ) : null}
             </div>
 
             {hasApprovalPrompt || hasInteractiveMenu ? (
@@ -733,7 +989,10 @@ function TerminalPane({
               <textarea
                 ref={enhancedInputRef}
                 value={draftInput}
-                onChange={(event) => setDraftInput(event.currentTarget.value)}
+                onChange={(event) => {
+                  setDraftInput(event.currentTarget.value);
+                  autoResizeTextarea();
+                }}
                 onCompositionStart={() => {
                   isComposingRef.current = true;
                 }}
@@ -786,6 +1045,10 @@ function CodexMessageView({ message }: CodexMessageViewProps): JSX.Element {
         </div>
         {isToolMessage ? (
           <CodexToolCard message={message} />
+        ) : message.markdown ? (
+          <div className="codex-chat-message__content codex-chat-message__content--markdown">
+            <SimpleMarkdown content={message.content} />
+          </div>
         ) : (
           <div className="codex-chat-message__content">{message.content}</div>
         )}
@@ -795,8 +1058,10 @@ function CodexMessageView({ message }: CodexMessageViewProps): JSX.Element {
 }
 
 function CodexToolCard({ message }: CodexMessageViewProps): JSX.Element {
-  const firstLine = message.content.split('\n').find((line) => line.trim().length > 0) ?? '';
-  const hasDetails = message.content.includes('\n') || message.content.length > 120;
+  const lines = message.content.split('\n');
+  const firstLine = lines.find((line) => line.trim().length > 0) ?? '';
+  const hasDetails = lines.length > 1 || message.content.length > 120;
+  const isDiff = message.toolKind === 'diff';
 
   return (
     <details className={`codex-tool-card codex-tool-card--${message.toolKind ?? 'log'}`} open={!hasDetails}>
@@ -809,7 +1074,28 @@ function CodexToolCard({ message }: CodexMessageViewProps): JSX.Element {
           <strong>{firstLine}</strong>
         </span>
       </summary>
-      <pre>{message.content}</pre>
+      {isDiff ? (
+        <div className="codex-tool-card__diff">
+          {lines.map((line, i) => (
+            <div
+              key={i}
+              className={
+                line.startsWith('+') && !line.startsWith('+++')
+                  ? 'codex-diff-line codex-diff-line--add'
+                  : line.startsWith('-') && !line.startsWith('---')
+                    ? 'codex-diff-line codex-diff-line--del'
+                    : line.startsWith('@@')
+                      ? 'codex-diff-line codex-diff-line--hunk'
+                      : 'codex-diff-line'
+              }
+            >
+              {line || '\u00a0'}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <pre>{message.content}</pre>
+      )}
     </details>
   );
 }
@@ -1021,6 +1307,121 @@ function getWorkspaceApi() {
   return window.vibeWorkspace;
 }
 
+// ─── SimpleMarkdown ──────────────────────────────────────────────────────────
+
+function SimpleMarkdown({ content }: { content: string }): JSX.Element {
+  const segments = splitCodeBlocks(content);
+
+  return (
+    <>
+      {segments.map((seg, i) => {
+        if (seg.type === 'code') {
+          return (
+            <pre key={i} className="codex-md-codeblock">
+              {seg.lang ? <span className="codex-md-lang">{seg.lang}</span> : null}
+              <code>{seg.text}</code>
+            </pre>
+          );
+        }
+
+        // Split into paragraphs at blank lines
+        const paras = seg.text.split(/\n{2,}/);
+
+        return paras.map((para, pi) => {
+          const trimmed = para.trim();
+          if (!trimmed) return null;
+
+          // Heading
+          const headingMatch = trimmed.match(/^(#{1,3}) (.+)$/);
+          if (headingMatch) {
+            const level = headingMatch[1].length;
+            const text = headingMatch[2];
+            const Tag = (`h${level + 2}`) as 'h3' | 'h4' | 'h5';
+            return (
+              <Tag key={`${i}-${pi}`} className="codex-md-heading">
+                {renderInline(text)}
+              </Tag>
+            );
+          }
+
+          // List items
+          const listLines = trimmed.split('\n').filter((l) => /^[-*] /.test(l.trim()));
+          if (listLines.length > 0 && listLines.length === trimmed.split('\n').filter(Boolean).length) {
+            return (
+              <ul key={`${i}-${pi}`} className="codex-md-list">
+                {listLines.map((l, li) => (
+                  <li key={li}>{renderInline(l.replace(/^[-*] /, ''))}</li>
+                ))}
+              </ul>
+            );
+          }
+
+          return (
+            <p key={`${i}-${pi}`} className="codex-md-para">
+              {renderInline(trimmed.replace(/\n/g, ' '))}
+            </p>
+          );
+        });
+      })}
+    </>
+  );
+}
+
+type Segment =
+  | { type: 'text'; text: string }
+  | { type: 'code'; lang: string; text: string };
+
+function splitCodeBlocks(content: string): Segment[] {
+  const result: Segment[] = [];
+  const fenceRe = /```(\w*)\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = fenceRe.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      result.push({ type: 'text', text: content.slice(lastIndex, match.index) });
+    }
+    result.push({ type: 'code', lang: match[1], text: match[2] });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    result.push({ type: 'text', text: content.slice(lastIndex) });
+  }
+
+  return result.length > 0 ? result : [{ type: 'text', text: content }];
+}
+
+function renderInline(text: string): (string | JSX.Element)[] {
+  // Handle **bold**, *italic*, `code`
+  const tokenRe = /(`[^`]+`)|\*\*([^*]+)\*\*|\*([^*]+)\*/g;
+  const parts: (string | JSX.Element)[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+
+  while ((m = tokenRe.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+
+    if (m[1]) {
+      // inline code
+      parts.push(<code key={key++} className="codex-md-code">{m[1].slice(1, -1)}</code>);
+    } else if (m[2]) {
+      // bold
+      parts.push(<strong key={key++}>{m[2]}</strong>);
+    } else if (m[3]) {
+      // italic
+      parts.push(<em key={key++}>{m[3]}</em>);
+    }
+
+    last = m.index + m[0].length;
+  }
+
+  if (last < text.length) parts.push(text.slice(last));
+
+  return parts;
+}
+
 interface ProfileHeroProps {
   loading: boolean;
   loginPending: boolean;
@@ -1029,7 +1430,6 @@ interface ProfileHeroProps {
   onLogin: () => void;
   onLogout: () => void;
   onRefreshAuth: () => void;
-  onRefreshUsage: () => void;
   project: Project;
   tab: AgentTab;
   titleId: string;
@@ -1043,7 +1443,6 @@ function ProfileHero({
   onLogin,
   onLogout,
   onRefreshAuth,
-  onRefreshUsage,
   project,
   tab,
   titleId,
@@ -1061,7 +1460,7 @@ function ProfileHero({
             <p className="eyebrow">isolated {profile.appKind} profile</p>
             <h1 id={titleId}>{tab.title}</h1>
             <div className="profile-hero__meta" title={project.path}>
-              {profile.appKind} · {project.name} · {formatRelativeTime(profile.updatedAt)}
+              {profile.appKind} - {project.name} - {formatRelativeTime(profile.updatedAt)}
             </div>
           </div>
         </div>
@@ -1102,12 +1501,6 @@ function ProfileHero({
           )}
         </div>
       </header>
-
-      <UsagePanel
-        disabled={loading || profile.authStatus !== 'connected'}
-        onRefresh={onRefreshUsage}
-        usage={profile.usageSnapshot}
-      />
 
       <ProfileActionGrid
         disabled={loading}

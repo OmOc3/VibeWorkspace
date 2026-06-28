@@ -564,14 +564,44 @@ function buildMockCodexScript(prompt: string): Array<[number, string]> {
     return [[80, '\r\n']];
   }
 
+  const p = prompt.slice(0, 80);
+
   return [
-    [80, '\r\nThinking...\r\n'],
-    [220, 'Running command: npm run typecheck\r\n'],
-    [360, 'Modified src/renderer/components/TabPlaceholder.tsx\r\n'],
-    [500, 'Allow Codex to run this command? [y/n]\r\n'],
+    // Thinking phase
+    [60,  '\r\nThinking...\r\n'],
+    // File reads — each becomes a file tool bubble
+    [260, 'Reading src/renderer/components/TabPlaceholder.tsx\r\n'],
+    [340, 'Reading src/renderer/codex/codexStreamParser.ts\r\n'],
+    // Shell command — `$ ` prefix is required to become a command bubble
+    [500, '$ npm run typecheck\r\n'],
+    [620, '> tsc --noEmit && tsc -p tsconfig.main.json --noEmit\r\n'],
+    // Diff output — "modified <file>" + standard hunk markers
+    [800, 'modified src/renderer/components/TabPlaceholder.tsx\r\n'],
+    [840, '@@ -963,5 +963,9 @@\r\n'],
+    [860, '-          <div className="codex-chat-message__content">{message.content}</div>\r\n'],
+    [880, '+        ) : message.markdown ? (\r\n'],
+    [900, '+          <SimpleMarkdown content={message.content} />\r\n'],
+    // Approval prompt — must contain [y/n] to trigger the approval panel
+    [1060, `Allow Codex to run this command? \`git commit -am "${p}"\` [y/n]\r\n`],
+    // Markdown-rich assistant response
     [
-      720,
-      `\u062a\u0645 \u0627\u0633\u062a\u0644\u0627\u0645 \u0631\u0633\u0627\u0644\u062a\u0643: ${prompt}\r\n\u0647\u0630\u0627 \u0631\u062f \u062a\u062c\u0631\u064a\u0628\u064a \u0645\u0646 \u0648\u0627\u062c\u0647\u0629 Codex \u0627\u0644\u062c\u062f\u064a\u062f\u0629. \u0627\u0644\u0648\u0627\u062c\u0647\u0629 \u062a\u0639\u0631\u0636 \u0627\u0644\u062a\u0641\u0643\u064a\u0631 \u0648\u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0628\u062f\u0648\u0646 \u0636\u0648\u0636\u0627\u0621 \u0627\u0644\u062a\u0631\u0645\u064a\u0646\u0627\u0644\u060c \u0648\u062a\u062f\u0639\u0645 \u0627\u0644\u0646\u0635 \u0627\u0644\u0639\u0631\u0628\u064a \u0628\u0648\u0636\u0648\u062d.\r\n`,
+      1500,
+      `Updated the **Codex UI** for: "${p}"\r\n` +
+      `\r\n` +
+      `**Changes:**\r\n` +
+      `- Added \`SimpleMarkdown\` renderer — bold, italic, inline code, fenced blocks\r\n` +
+      `- Narrowed stream-parser patterns to stop false-positive classifications\r\n` +
+      `- Diff card now renders **green/red** line highlighting\r\n` +
+      `- Composer textarea auto-resizes as you type\r\n` +
+      `\r\n` +
+      `Example of the new approval detection:\r\n` +
+      '```typescript\r\n' +
+      `function isApprovalLine(line: string): boolean {\r\n` +
+      `  return line.includes('[y/n]') || /allow codex to/.test(line);\r\n` +
+      `}\r\n` +
+      '```\r\n' +
+      `\r\n` +
+      `Type a follow-up below.\r\n`,
     ],
   ];
 }

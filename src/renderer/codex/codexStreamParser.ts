@@ -2,6 +2,7 @@ import type { AgentSubtab } from '../../shared/models';
 
 export type CodexChatRole = 'assistant' | 'approval' | 'error' | 'system' | 'tool' | 'user';
 export type CodexToolKind = 'command' | 'diff' | 'file' | 'log' | 'status';
+
 export type CodexActivityKind =
   | 'completed'
   | 'editing-file'
@@ -30,6 +31,8 @@ export interface CodexChatMessage {
   title?: string;
   toolKind?: CodexToolKind;
   detail?: string;
+  /** When true the UI should render the content as simple markdown. */
+  markdown?: boolean;
 }
 
 export interface CodexAgentActivity {
@@ -67,9 +70,9 @@ const ANSI_PATTERN =
   /(?:\x1B\][^\x07]*(?:\x07|\x1B\\)|\x1B[@-Z\\-_]|\x1B\[[0-?]*[ -/]*[@-~]|\x9B[0-?]*[ -/]*[@-~])/g;
 // eslint-disable-next-line no-control-regex
 const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000e-\u001f\u007f-\u009f]/g;
+// Explicit shell prompt: must start with $ or ❯ followed by whitespace then a command
+const SHELL_PROMPT_PATTERN = /^(?:\$|\u276f)\s+\S/;
 const BOX_DRAWING_PATTERN = /[\u2500-\u259f]/g;
-const SHELL_COMMAND_PATTERN =
-  /\b(?:cmd|deno|git|npm|npx|pnpm|powershell|python|rg|tsc|vite|yarn|node)\b/i;
 const SOURCE_FILE_PATTERN =
   /(?:^|\s|[/\\])[\w.-]+\.(?:cjs|css|html|js|jsx|json|md|mjs|py|ts|tsx|yaml|yml)(?=$|\s|:)/i;
 
@@ -77,6 +80,10 @@ export class CodexStreamParser {
   private pendingLine = '';
   private sequence = 0;
   private state: CodexUiState;
+  // Code-block accumulation
+  private inCodeBlock = false;
+  private codeBlockLang = '';
+  private codeBlockLines: string[] = [];
 
   constructor(title: string, preset: AgentSubtab['preset']) {
     this.state = createInitialCodexUiState(title, preset);
@@ -88,18 +95,21 @@ export class CodexStreamParser {
 
   reset(title: string, preset: AgentSubtab['preset']): CodexUiState {
     this.pendingLine = '';
+    this.flushCodeBlock();
     this.state = createInitialCodexUiState(title, preset);
     return this.getState();
   }
 
   clear(title: string, preset: AgentSubtab['preset']): CodexUiState {
     this.pendingLine = '';
+    this.flushCodeBlock();
     this.state = createInitialCodexUiState(title, preset, 'Conversation cleared.');
     return this.getState();
   }
 
   markStarting(title: string, projectName: string): CodexUiState {
     this.pendingLine = '';
+    this.flushCodeBlock();
     this.state = {
       messages: [
         this.createMessage('system', `Starting ${title} in ${projectName}.`, {
@@ -128,6 +138,7 @@ export class CodexStreamParser {
 
   markStopped(): CodexUiState {
     this.pendingLine = '';
+    this.flushCodeBlock();
     this.state = {
       messages: [
         ...this.state.messages,
@@ -143,6 +154,7 @@ export class CodexStreamParser {
 
   markExited(exitCode: number | null): CodexUiState {
     this.pendingLine = '';
+    this.flushCodeBlock();
     this.state = {
       messages: [
         ...this.state.messages,
@@ -162,6 +174,7 @@ export class CodexStreamParser {
 
   markError(message: string): CodexUiState {
     this.pendingLine = '';
+    this.flushCodeBlock();
     this.state = {
       messages: [
         ...this.state.messages,
@@ -225,6 +238,24 @@ export class CodexStreamParser {
   private consumeLine(rawLine: string): void {
     const line = cleanCodexLine(rawLine);
 
+    // ── Code-block fence handling ──────────────────────────────────────────
+    if (line.startsWith('```')) {
+      if (this.inCodeBlock) {
+        this.flushCodeBlock();
+      } else {
+        this.inCodeBlock = true;
+        this.codeBlockLang = line.slice(3).trim();
+        this.codeBlockLines = [];
+      }
+      return;
+    }
+
+    if (this.inCodeBlock) {
+      this.codeBlockLines.push(rawLine); // keep original indentation inside blocks
+      return;
+    }
+
+    // ── Normal line processing ─────────────────────────────────────────────
     if (!line || isTerminalNoise(line) || isDuplicateVisibleLine(this.state.messages, line)) {
       return;
     }
@@ -296,7 +327,7 @@ export class CodexStreamParser {
       return;
     }
 
-    if (SOURCE_FILE_PATTERN.test(line)) {
+    if (isFileReferenceLine(line, normalizedLine)) {
       this.addToolMessage('file', 'File reference', line);
       this.setActiveActivity('reading-file', 'Reading project files', line);
       return;
@@ -310,6 +341,21 @@ export class CodexStreamParser {
     }
 
     this.addAssistantLine(line);
+  }
+
+  private flushCodeBlock(): void {
+    if (!this.inCodeBlock || this.codeBlockLines.length === 0) {
+      this.inCodeBlock = false;
+      this.codeBlockLines = [];
+      this.codeBlockLang = '';
+      return;
+    }
+    const content = this.codeBlockLines.join('\n');
+    const titleLabel = this.codeBlockLang ? `Code · ${this.codeBlockLang}` : 'Code block';
+    this.addToolMessage('file', titleLabel, content);
+    this.inCodeBlock = false;
+    this.codeBlockLines = [];
+    this.codeBlockLang = '';
   }
 
   private addAssistantLine(line: string): void {
@@ -326,9 +372,10 @@ export class CodexStreamParser {
           {
             ...previous,
             content: `${previous.content}\n${line}`,
+            markdown: true,
           },
         ]
-      : [...messages, this.createMessage('assistant', line)];
+      : [...messages, this.createMessage('assistant', line, { markdown: true })];
 
     this.state = {
       ...this.state,
@@ -374,7 +421,7 @@ export class CodexStreamParser {
   private addMessage(
     role: CodexChatRole,
     content: string,
-    options?: Pick<CodexChatMessage, 'detail' | 'title' | 'toolKind'>,
+    options?: Pick<CodexChatMessage, 'detail' | 'title' | 'toolKind' | 'markdown'>,
   ): void {
     this.state = {
       ...this.state,
@@ -411,7 +458,7 @@ export class CodexStreamParser {
   private createMessage(
     role: CodexChatRole,
     content: string,
-    options?: Pick<CodexChatMessage, 'detail' | 'title' | 'toolKind'>,
+    options?: Pick<CodexChatMessage, 'detail' | 'title' | 'toolKind' | 'markdown'>,
   ): CodexChatMessage {
     return {
       id: this.nextId(role),
@@ -533,33 +580,35 @@ function shouldRenderPartialLine(line: string): boolean {
 
 function isThinkingLine(normalizedLine: string): boolean {
   return (
-    normalizedLine.includes('thinking') ||
-    normalizedLine.includes('reasoning') ||
-    normalizedLine.includes('working') ||
-    normalizedLine.includes('planning') ||
-    normalizedLine.includes('analyzing')
+    // Spinner text with trailing dots — e.g. "Thinking..."
+    /^(?:thinking|reasoning|working|planning|analyzing)\.{2,}$/.test(normalizedLine) ||
+    // Bracketed TUI indicator — e.g. "[Thinking]"
+    /^\[(?:thinking|reasoning|working)\]/.test(normalizedLine) ||
+    // Braille-spinner characters at line start (common in TUI tools)
+    /^[\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f]/.test(normalizedLine) ||
+    normalizedLine === 'thinking...' ||
+    normalizedLine === 'thinking'
   );
 }
 
 function isApprovalLine(normalizedLine: string): boolean {
   return (
-    normalizedLine.includes('approve') ||
-    normalizedLine.includes('allow') ||
-    normalizedLine.includes('deny') ||
-    normalizedLine.includes('permission') ||
-    normalizedLine.includes('approval') ||
-    normalizedLine.includes('run this command') ||
     normalizedLine.includes('[y/n]') ||
-    normalizedLine.includes('y/n')
+    normalizedLine.includes('(y/n)') ||
+    normalizedLine.includes('[yes/no]') ||
+    normalizedLine.includes('(yes/no)') ||
+    /allow codex to/.test(normalizedLine) ||
+    /run this command\?/.test(normalizedLine)
   );
 }
 
 function isMenuLine(line: string, normalizedLine: string): boolean {
+  // Require unambiguous menu patterns: "› [option]" style or numbered list
   return (
-    normalizedLine.includes('select') ||
-    normalizedLine.includes('choose') ||
-    /^[>›]\s/.test(line) ||
-    /^[/@]\w/.test(line)
+    /^[>›]\s+\[/.test(line) ||
+    /^\(\d+\)/.test(line) ||
+    (normalizedLine.startsWith('select ') && /\d/.test(normalizedLine)) ||
+    (normalizedLine.startsWith('choose ') && /\(\d+\)/.test(normalizedLine))
   );
 }
 
@@ -577,31 +626,46 @@ function stripSpeakerPrefix(line: string): string {
 
 function isCommandLine(line: string, normalizedLine: string): boolean {
   return (
-    SHELL_COMMAND_PATTERN.test(line) ||
-    /^\$ /.test(line) ||
-    normalizedLine.includes('running command') ||
-    normalizedLine.includes('command:') ||
-    normalizedLine.includes('exit code')
+    // Must start with an explicit shell prompt marker
+    SHELL_PROMPT_PATTERN.test(line) ||
+    normalizedLine.startsWith('running command:') ||
+    normalizedLine.startsWith('executing:') ||
+    normalizedLine.startsWith('running:') ||
+    /^exit code\s+\d/.test(normalizedLine)
   );
 }
 
 function isDiffLine(line: string, normalizedLine: string): boolean {
+  // Unified diff markers
+  if (line.startsWith('@@') || /^---\s/.test(line) || /^\+\+\+\s/.test(line)) return true;
+  // Git diff header
+  if (/^diff --git\s/.test(normalizedLine)) return true;
+  // Explicit file-operation labels with a real file path
+  if (
+    /^(?:modified|created|deleted) file:\s/.test(normalizedLine) ||
+    (/^(?:modified|created|deleted) /.test(normalizedLine) && SOURCE_FILE_PATTERN.test(line))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** A file-reference line: mentions a source file path but is NOT a diff or command. */
+function isFileReferenceLine(line: string, normalizedLine: string): boolean {
   return (
-    normalizedLine.includes('modified') ||
-    normalizedLine.includes('created') ||
-    normalizedLine.includes('deleted') ||
-    line.startsWith('@@') ||
-    /^\s*[+-]\s/.test(line)
+    SOURCE_FILE_PATTERN.test(line) &&
+    !isCommandLine(line, normalizedLine) &&
+    !isDiffLine(line, normalizedLine)
   );
 }
 
 function isErrorLine(normalizedLine: string): boolean {
   return (
-    normalizedLine.includes('error:') ||
-    normalizedLine.includes('failed') ||
-    normalizedLine.includes('exception') ||
-    normalizedLine.includes('denied') ||
-    normalizedLine.includes('not found')
+    /^error:\s/.test(normalizedLine) ||
+    /^fatal:\s/.test(normalizedLine) ||
+    /^exception:\s/.test(normalizedLine) ||
+    normalizedLine.startsWith('uncaught ') ||
+    normalizedLine.startsWith('unhandled ')
   );
 }
 
@@ -619,12 +683,9 @@ function summarizeApproval(line: string): string {
 
 function extractInlineCommand(line: string): string | undefined {
   const quoted = line.match(/[`"']([^`"']{3,})[`"']/);
-
-  if (quoted) {
-    return quoted[1];
-  }
-
-  return SHELL_COMMAND_PATTERN.test(line) ? line : undefined;
+  if (quoted) return quoted[1];
+  if (SHELL_PROMPT_PATTERN.test(line)) return line.replace(/^.*?\$\s+/, '').trim();
+  return undefined;
 }
 
 function isDuplicateVisibleLine(
